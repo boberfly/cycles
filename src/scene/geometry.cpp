@@ -414,19 +414,24 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
     /* Re-create volume mesh if we will rebuild or refit the BVH. Note we
      * should only do it in that case, otherwise the BVH and mesh can go
      * out of sync. */
-    if (geom->is_modified() && geom->is_volume()) {
-      /* Create volume meshes if there is voxel data. */
-      if (!volume_images_updated) {
-        progress.set_status("Updating Meshes Volume Bounds");
-        device_update_volume_images(device, scene, progress);
-        volume_images_updated = true;
+    if (geom->is_volume()) {
+      if (geom->need_update_rebuild) {
+        /* Create volume meshes if there is voxel data. */
+        if (!volume_images_updated) {
+          progress.set_status("Updating Meshes Volume Bounds");
+          device_update_volume_images(device, scene, progress);
+          volume_images_updated = true;
+        }
+
+        Volume *volume = static_cast<Volume *>(geom);
+        create_volume_mesh(scene, volume, progress);
+
+        /* always reallocate when we have a volume, as we need to rebuild the BVH */
+        device_update_flags |= DEVICE_MESH_DATA_NEEDS_REALLOC;
       }
-
-      Volume *volume = static_cast<Volume *>(geom);
-      create_volume_mesh(scene, volume, progress);
-
-      /* always reallocate when we have a volume, as we need to rebuild the BVH */
-      device_update_flags |= DEVICE_MESH_DATA_NEEDS_REALLOC;
+      else if (geom->is_modified()) {
+        device_update_flags |= DEVICE_MESH_DATA_MODIFIED;
+      }
     }
 
     if (geom->is_hair()) {

@@ -311,4 +311,13 @@ openvdb::GridBase::ConstPtr VDBImageLoader::get_grid()
 }
 #endif
 
+int VDBImageLoader::get_precision() const
+{
+#ifdef WITH_NANOVDB
+  return precision;
+#else
+  return 0;
+#endif
+}
+
 CCL_NAMESPACE_END

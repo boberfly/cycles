@@ -44,6 +44,8 @@ class VDBImageLoader : public ImageLoader {
 
   bool is_vdb_loader() const override;
 
+  int get_precision() const;
+
 #ifdef WITH_OPENVDB
   openvdb::GridBase::ConstPtr get_grid();
 #endif
