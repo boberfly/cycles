@@ -106,7 +106,7 @@ target_compile_definitions(cycles_hydra
   GLOG_NO_ABBREVIATED_SEVERITIES=1
   OSL_DEBUG=$<CONFIG:DEBUG>
   TBB_USE_DEBUG=$<CONFIG:DEBUG>
-  $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX=1>
+  $<$<CXX_COMPILER_ID:MSVC>:NOMINMAX=1 /DHAVE_SNPRINTF>
 )
 
 target_link_libraries(cycles_hydra
