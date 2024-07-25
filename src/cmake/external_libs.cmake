@@ -186,13 +186,13 @@ if(WITH_USD)
   set_and_warn_library_found("USD" USD_FOUND WITH_USD)
 
   if(WIN32)
-    set(PYTHON_VERSION 3.11)
+    set(PYTHON_VERSION $ENV{PYTHON_VERSION})
     string(REPLACE "." "" PYTHON_VERSION_NO_DOTS ${PYTHON_VERSION})
-    set(PYTHON_INCLUDE_DIRS ${PYTHON_ROOT_DIR}/${PYTHON_VERSION_NO_DOTS}/include)
+    set(PYTHON_INCLUDE_DIRS ${PYTHON_ROOT_DIR}/include)
     set(PYTHON_LIBRARIES
-      optimized ${PYTHON_ROOT_DIR}/${PYTHON_VERSION_NO_DOTS}/libs/python${PYTHON_VERSION_NO_DOTS}.lib
-      debug ${PYTHON_ROOT_DIR}/${PYTHON_VERSION_NO_DOTS}/libs/python${PYTHON_VERSION_NO_DOTS}_d.lib)
-    link_directories(${PYTHON_ROOT_DIR}/${PYTHON_VERSION_NO_DOTS}/libs)
+      optimized ${PYTHON_ROOT_DIR}/libs/python${PYTHON_VERSION_NO_DOTS}.lib
+      debug ${PYTHON_ROOT_DIR}/libs/python${PYTHON_VERSION_NO_DOTS}_d.lib)
+    link_directories(${PYTHON_ROOT_DIR}/libs)
     if(NOT HOUDINI_ROOT AND NOT PXR_ROOT)
       add_bundled_libraries(python/${PYTHON_VERSION_NO_DOTS}/bin)
     endif()
