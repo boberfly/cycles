@@ -199,6 +199,8 @@ if(WITH_USD)
   else()
     find_package(PythonLibsUnix REQUIRED)
   endif()
+  # OpenUSD 24.08 brings in OpenGL::GL
+  find_package(OpenGL REQUIRED)
 endif()
 
 ###########################################################################
