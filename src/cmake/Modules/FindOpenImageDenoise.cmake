@@ -39,7 +39,7 @@ find_path(OPENIMAGEDENOISE_INCLUDE_DIR
 )
 
 set(_openimagedenoise_FIND_COMPONENTS
-  OpenImageDenoise
+  CyclesOpenImageDenoise
 )
 
 # These are needed when building statically
@@ -89,7 +89,7 @@ endforeach()
 
 find_library(OPENIMAGEDENOISE_LIBRARY
   NAMES
-    OpenImageDenoise
+    CyclesOpenImageDenoise
   HINTS
     ${_openimagedenoise_SEARCH_DIRS}
   PATH_SUFFIXES
