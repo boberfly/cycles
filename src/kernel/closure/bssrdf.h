@@ -63,6 +63,8 @@ ccl_device float bssrdf_dipole_compute_alpha_prime(const float rd, const float f
   return xmid;
 }
 
+#define BSSRDF_RADIUS_COMPATIBILITY_FACTOR (0.25f * M_1_PI_F)
+
 ccl_device void bssrdf_setup_radius(ccl_private Bssrdf *bssrdf, const ClosureType type)
 {
   if (type == CLOSURE_BSSRDF_BURLEY_ID || type == CLOSURE_BSSRDF_RANDOM_WALK_ID) {

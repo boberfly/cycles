@@ -996,15 +996,15 @@ ccl_device void osl_closure_subsurface_bssrdf_setup(
     const ccl_private SubsurfaceBSSRDFClosure *closure,
     float3 *layer_albedo)
 {
-  ccl_private Bssrdf *bssrdf = bssrdf_alloc(sd, rgb_to_spectrum(weight));
+  ccl_private Bssrdf *bssrdf = bssrdf_alloc(sd, rgb_to_spectrum(closure->albedo * weight));
   if (!bssrdf) {
     return;
   }
 
 #if OSL_LIBRARY_VERSION_CODE >= 11401
-  bssrdf->radius = closure->radius;
+  bssrdf->radius = (1.0f/BSSRDF_RADIUS_COMPATIBILITY_FACTOR) * closure->radius;
 #else
-  bssrdf->radius = closure->transmission_depth * closure->transmission_color;
+  bssrdf->radius = (1.0f/BSSRDF_RADIUS_COMPATIBILITY_FACTOR) * closure->transmission_depth * closure->transmission_color;
 #endif
 
   bssrdf->albedo = closure->albedo;
