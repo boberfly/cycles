@@ -16,6 +16,7 @@ set(LIB
   cycles_scene
   cycles_session
   cycles_graph
+  PUBLIC bf::dependencies::openimageio
   bf::dependencies::epoxy
 )
 cycles_external_libraries_append(LIB)
