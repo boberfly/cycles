@@ -149,7 +149,7 @@ struct NodeType {
   static thread_mutex node_type_mutex_;
 
 #define NODE_DEFINE(structname) \
-  const NodeType *structname::node_type_ = get_node_type(); \
+  const NodeType *structname::node_type_ = nullptr; \
   thread_mutex structname::node_type_mutex_; \
   unique_ptr<Node> structname::create(const NodeType *) \
   { \
