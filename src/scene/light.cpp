@@ -56,8 +56,9 @@ static void shade_background_pixels(Device *device,
             float const v = (y + 0.5f) / height;
 
             KernelShaderEvalInput in;
-            in.object = OBJECT_NONE;
-            in.prim = PRIM_NONE;
+            /* Repurpose object and prim to pass resolution for ray differential. */
+            in.object = width;
+            in.prim = height;
             in.u = u;
             in.v = v;
             d_input_data[x + y * width] = in;
@@ -1014,7 +1015,7 @@ void LightManager::device_update_background(Device *device,
     if (node->type == EnvironmentTextureNode::get_node_type()) {
       EnvironmentTextureNode *env = (EnvironmentTextureNode *)node;
       if (!env->handle.empty()) {
-        const ImageMetaData metadata = env->handle.metadata();
+        const ImageMetaData metadata = env->handle.metadata(progress);
         environment_res.x = max(environment_res.x, (int)metadata.width);
         environment_res.y = max(environment_res.y, (int)metadata.height);
       }

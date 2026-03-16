@@ -75,7 +75,7 @@ class SVMCompiler {
     string full_report() const;
   };
 
-  SVMCompiler(Scene *scene);
+  SVMCompiler(Scene *scene, Progress &progress);
   void compile(Shader *shader,
                array<int4> &svm_nodes,
                const int index,
@@ -89,14 +89,22 @@ class SVMCompiler {
   int stack_assign_if_not_equal(ShaderInput *input, const float value);
   int stack_assign_if_not_equal(ShaderInput *input, const float3 value);
   int stack_find_offset(const int size);
-  int stack_find_offset(SocketType::Type type);
-  void stack_clear_offset(SocketType::Type type, const int offset);
+  int stack_find_offset(const ShaderIO *io);
+  void stack_clear_offset(const ShaderIO *io, const int offset);
   void stack_link(ShaderInput *input, ShaderOutput *output);
 
   void add_node(ShaderNodeType type, const int a = 0, const int b = 0, const int c = 0);
+  void add_node_derivative(const ShaderNodeType type,
+                           const uint derivative_bit,
+                           const int a = 0,
+                           const int b = 0,
+                           const int c = 0);
   void add_node(const int a = 0, const int b = 0, const int c = 0, const int d = 0);
-  void add_node(ShaderNodeType type, const float3 &f);
+  void add_node(const ShaderNode *node, const int a = 0, const int b = 0, const int c = 0);
+  void add_node(ShaderNodeType type, const float3 &f, const uint derivative_bit = 0);
   void add_node(const float4 &f);
+  void add_value_node(const ShaderNode *node, const int value, const int stack_offset);
+  void add_value_node(const ShaderNode *node, const float3 &value, const int stack_offset);
   uint attribute(ustring name);
   uint attribute(AttributeStandard std);
   uint attribute_standard(ustring name);
@@ -116,6 +124,7 @@ class SVMCompiler {
   }
 
   Scene *scene;
+  Progress &progress;
   ShaderGraph *current_graph;
   bool background;
 
@@ -193,6 +202,7 @@ class SVMCompiler {
 
   void stack_clear_temporary(ShaderNode *node);
   int stack_size(SocketType::Type type);
+  int stack_size(const ShaderIO *io);
   void stack_clear_users(ShaderNode *node, ShaderNodeSet &done);
 
   /* single closure */

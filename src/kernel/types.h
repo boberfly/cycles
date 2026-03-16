@@ -52,6 +52,9 @@ CCL_NAMESPACE_BEGIN
 #define PASS_UNUSED (~0)
 #define LIGHTGROUP_NONE (~0)
 
+#define DERIVATIVE_BIT 31U
+#define DERIVATIVE_MASK (1U << DERIVATIVE_BIT)
+
 #define LIGHT_LINK_SET_MAX 64
 #define LIGHT_LINK_MASK_ALL (~uint64_t(0))
 
@@ -286,6 +289,7 @@ enum ClosureLabel {
   LABEL_TRANSMIT_TRANSPARENT = 128,
   LABEL_SUBSURFACE_SCATTER = 256,
   LABEL_RAY_PORTAL = 512,
+  LABEL_CACHE_MISS = 1024,
 };
 
 /* Render Passes */
@@ -685,18 +689,31 @@ enum AttributeElement {
    * match the data type returned when reading the attribute and needs a
    * conversion or interpolation when reading. */
   ATTR_ELEMENT_IS_MOTION = (1 << 8),
+  ATTR_ELEMENT_IS_NORMAL = (1 << 9),
   ATTR_ELEMENT_IS_BYTE = (1 << 10),
 
   /* Only these combinations are supported by the kernel and can be
    * created on geometry. */
   ATTR_ELEMENT_VERTEX_MOTION = ATTR_ELEMENT_VERTEX | ATTR_ELEMENT_IS_MOTION,
+  ATTR_ELEMENT_VERTEX_NORMAL = ATTR_ELEMENT_VERTEX | ATTR_ELEMENT_IS_NORMAL,
+  ATTR_ELEMENT_VERTEX_NORMAL_MOTION = ATTR_ELEMENT_VERTEX | ATTR_ELEMENT_IS_NORMAL |
+                                      ATTR_ELEMENT_IS_MOTION,
+
   ATTR_ELEMENT_CORNER_BYTE = ATTR_ELEMENT_CORNER | ATTR_ELEMENT_IS_BYTE,
+  ATTR_ELEMENT_CORNER_NORMAL = ATTR_ELEMENT_CORNER | ATTR_ELEMENT_IS_NORMAL,
+  ATTR_ELEMENT_CORNER_NORMAL_MOTION = ATTR_ELEMENT_CORNER | ATTR_ELEMENT_IS_NORMAL |
+                                      ATTR_ELEMENT_IS_MOTION,
+
   ATTR_ELEMENT_CURVE_KEY_MOTION = ATTR_ELEMENT_CURVE_KEY | ATTR_ELEMENT_IS_MOTION,
+  ATTR_ELEMENT_CURVE_KEY_NORMAL = ATTR_ELEMENT_CURVE_KEY | ATTR_ELEMENT_IS_NORMAL,
+  ATTR_ELEMENT_CURVE_KEY_NORMAL_MOTION = ATTR_ELEMENT_CURVE_KEY | ATTR_ELEMENT_IS_NORMAL |
+                                         ATTR_ELEMENT_IS_MOTION,
 };
 
 enum AttributeStandard {
   ATTR_STD_NONE = 0,
   ATTR_STD_VERTEX_NORMAL,
+  ATTR_STD_CORNER_NORMAL,
   ATTR_STD_UV,
   ATTR_STD_UV_TANGENT,
   ATTR_STD_UV_TANGENT_SIGN,
@@ -710,6 +727,7 @@ enum AttributeStandard {
   ATTR_STD_NORMAL_UNDISPLACED,
   ATTR_STD_MOTION_VERTEX_POSITION,
   ATTR_STD_MOTION_VERTEX_NORMAL,
+  ATTR_STD_MOTION_CORNER_NORMAL,
   ATTR_STD_PARTICLE,
   ATTR_STD_CURVE_INTERCEPT,
   ATTR_STD_CURVE_LENGTH,
@@ -851,10 +869,12 @@ enum ShaderDataFlag {
   SD_BSDF_HAS_TRANSMISSION = (1 << 10),
   /* Shader has ray portal closure. */
   SD_RAY_PORTAL = (1 << 11),
+  /* Shader evaluation needs to be redone, because of texture cache miss */
+  SD_CACHE_MISS = (1 << 12),
 
   SD_CLOSURE_FLAGS = (SD_EMISSION | SD_BSDF | SD_BSDF_HAS_EVAL | SD_BSSRDF | SD_HOLDOUT |
                       SD_EXTINCTION | SD_SCATTER | SD_IS_VOLUME_SHADER_EVAL |
-                      SD_BSDF_HAS_TRANSMISSION | SD_RAY_PORTAL),
+                      SD_BSDF_HAS_TRANSMISSION | SD_RAY_PORTAL | SD_CACHE_MISS),
 
   /* Shader flags. */
 
@@ -931,6 +951,8 @@ enum ShaderDataObjectFlag : uint {
   SD_OBJECT_CAUSTICS_RECEIVER = (1u << 10),
   /* object has attribute for volume motion */
   SD_OBJECT_HAS_VOLUME_MOTION = (1u << 11),
+  /* Geometry has per-corner normals instead of per-vertex. */
+  SD_OBJECT_HAS_CORNER_NORMALS = (1u << 12),
 
   /* object is using caustics */
   SD_OBJECT_CAUSTICS = (SD_OBJECT_CAUSTICS_CASTER | SD_OBJECT_CAUSTICS_RECEIVER),
@@ -939,7 +961,7 @@ enum ShaderDataObjectFlag : uint {
                      SD_OBJECT_NEGATIVE_SCALE | SD_OBJECT_HAS_VOLUME |
                      SD_OBJECT_INTERSECTS_VOLUME | SD_OBJECT_SHADOW_CATCHER |
                      SD_OBJECT_HAS_VOLUME_ATTRIBUTES | SD_OBJECT_CAUSTICS |
-                     SD_OBJECT_HAS_VOLUME_MOTION)
+                     SD_OBJECT_HAS_VOLUME_MOTION | SD_OBJECT_HAS_CORNER_NORMALS)
 };
 
 struct ccl_align(16) ShaderData {
@@ -1075,7 +1097,7 @@ struct VolumeStack {
 /* Struct to gather multiple nearby intersections. */
 struct LocalIntersection {
   int num_hits;
-  struct Intersection hits[LOCAL_MAX_HITS];
+  Intersection hits[LOCAL_MAX_HITS];
   float3 Ng[LOCAL_MAX_HITS];
 };
 
@@ -1305,9 +1327,9 @@ struct ccl_align(16) KernelData {
   /* Device specific BVH. */
 #ifdef __KERNEL_OPTIX__
   OptixTraversableHandle device_bvh;
-#elif defined __METALRT__
+#elif defined __KERNEL_METALRT__
   metalrt_as_type device_bvh;
-#elif defined(__HIPRT__)
+#elif defined(__KERNEL_HIPRT__)
   void *device_bvh;
 #else
 #  ifdef __EMBREE__
@@ -1343,13 +1365,14 @@ struct KernelObject {
   float dupli_generated[3];
   float dupli_uv[2];
 
-  int numkeys;
-  int num_geom_steps;
-  int num_tfm_steps;
+  uint16_t num_geom_steps;
+  uint16_t num_tfm_steps;
   int numverts;
+  int numprims;
 
   uint attribute_map_offset;
   uint motion_offset;
+  int normal_attr_offset;
 
   float cryptomatte_object;
   float cryptomatte_asset;
@@ -1628,6 +1651,12 @@ struct KernelShaderEvalInput {
 };
 static_assert_align(KernelShaderEvalInput, 16);
 
+enum ShaderEvalResult {
+  SHADER_EVAL_EMPTY = 0,
+  SHADER_EVAL_OK = 1,
+  SHADER_EVAL_CACHE_MISS = 2,
+};
+
 /* Pre-computed sample table sizes for the tabulated Sobol sampler.
  *
  * NOTE: min and max samples *must* be a power of two, and patterns
@@ -1717,6 +1746,7 @@ enum DeviceKernel : int {
   DEVICE_KERNEL_FILTER_GUIDING_SET_FAKE_ALBEDO,
   DEVICE_KERNEL_FILTER_COLOR_PREPROCESS,
   DEVICE_KERNEL_FILTER_COLOR_POSTPROCESS,
+  DEVICE_KERNEL_FILTER_COLOR_FLIP_Y,
 
   DEVICE_KERNEL_VOLUME_GUIDING_FILTER_X,
   DEVICE_KERNEL_VOLUME_GUIDING_FILTER_Y,

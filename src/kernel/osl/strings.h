@@ -5,6 +5,8 @@
  *
  * Adapted code from Open Shading Language. */
 
+#pragma once
+
 #include "kernel/osl/types.h"
 
 #ifndef __KERNEL_GPU__
@@ -96,6 +98,14 @@ OSL_DEVICE_STRING(u_aperture_aspect_ratio, "cam:aperture_aspect_ratio", 87082211
 OSL_DEVICE_STRING(u_aperture_size, "cam:aperture_size", 3708482920470008383ull)
 OSL_DEVICE_STRING(u_aperture_position, "cam:aperture_position", 12926784411960338650ull)
 OSL_DEVICE_STRING(u_focal_distance, "cam:focal_distance", 7162995161881858159ull)
+
+OSL_DEVICE_STRING(u_resolution, "resolution", 2307859618413965908ull)
+OSL_DEVICE_STRING(u_channels, "channels", 12748693449878651001ull)
+OSL_DEVICE_STRING(u_format, "format", 17018903787179094860ull)
+OSL_DEVICE_STRING(u_fileformat, "fileformat", 4858431823914058665ull)
+OSL_DEVICE_STRING(u_colorspace, "colorspace", 8710743381164964946ull)
+OSL_DEVICE_STRING(u_exists, "exists", 11446133498368803600ull)
+OSL_DEVICE_STRING(u_averagecolor, "averagecolor", 3004396188475227877ull)
 
 OSL_DEVICE_STRING(u_distance, "distance", 5661183123366514158ull)
 OSL_DEVICE_STRING(u_index, "index", 15907549540151602841ull)

@@ -12,6 +12,7 @@
 
 #include "util/boundbox.h"
 #include "util/set.h"
+#include "util/task.h"
 #include "util/transform.h"
 #include "util/types.h"
 #include "util/vector.h"
@@ -42,21 +43,22 @@ enum {
   ATTR_FLOAT3_MODIFIED = (1 << 5),
   ATTR_FLOAT4_MODIFIED = (1 << 6),
   ATTR_UCHAR4_MODIFIED = (1 << 7),
+  ATTR_NORMAL_MODIFIED = (1 << 8),
 
-  CURVE_DATA_NEED_REALLOC = (1 << 8),
-  MESH_DATA_NEED_REALLOC = (1 << 9),
-  POINT_DATA_NEED_REALLOC = (1 << 10),
+  CURVE_DATA_NEED_REALLOC = (1 << 9),
+  MESH_DATA_NEED_REALLOC = (1 << 10),
+  POINT_DATA_NEED_REALLOC = (1 << 11),
 
-  ATTR_FLOAT_NEEDS_REALLOC = (1 << 11),
-  ATTR_FLOAT2_NEEDS_REALLOC = (1 << 12),
-  ATTR_FLOAT3_NEEDS_REALLOC = (1 << 13),
-  ATTR_FLOAT4_NEEDS_REALLOC = (1 << 14),
-
-  ATTR_UCHAR4_NEEDS_REALLOC = (1 << 15),
+  ATTR_FLOAT_NEEDS_REALLOC = (1 << 12),
+  ATTR_FLOAT2_NEEDS_REALLOC = (1 << 13),
+  ATTR_FLOAT3_NEEDS_REALLOC = (1 << 14),
+  ATTR_FLOAT4_NEEDS_REALLOC = (1 << 15),
+  ATTR_UCHAR4_NEEDS_REALLOC = (1 << 16),
+  ATTR_NORMAL_NEEDS_REALLOC = (1 << 17),
 
   ATTRS_NEED_REALLOC = (ATTR_FLOAT_NEEDS_REALLOC | ATTR_FLOAT2_NEEDS_REALLOC |
                         ATTR_FLOAT3_NEEDS_REALLOC | ATTR_FLOAT4_NEEDS_REALLOC |
-                        ATTR_UCHAR4_NEEDS_REALLOC),
+                        ATTR_UCHAR4_NEEDS_REALLOC | ATTR_NORMAL_NEEDS_REALLOC),
   DEVICE_MESH_DATA_NEEDS_REALLOC = (MESH_DATA_NEED_REALLOC | ATTRS_NEED_REALLOC),
   DEVICE_POINT_DATA_NEEDS_REALLOC = (POINT_DATA_NEED_REALLOC | ATTRS_NEED_REALLOC),
   DEVICE_CURVE_DATA_NEEDS_REALLOC = (CURVE_DATA_NEED_REALLOC | ATTRS_NEED_REALLOC),
@@ -199,6 +201,11 @@ class Geometry : public Node {
 
 class GeometryManager {
   uint32_t update_flags;
+
+  /* Persistent task pool for BVH building, because the Embree scene creates its own
+   * task group that has a parent pointer to this one. And if we create a task pool
+   * on the stack, that becomes a dangling pointer. See #143662 for details. */
+  TaskPool bvh_task_pool_;
 
  public:
   enum : uint32_t {

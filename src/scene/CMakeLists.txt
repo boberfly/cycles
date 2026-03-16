@@ -13,7 +13,6 @@ set(SRC
   background.cpp
   bake.cpp
   camera.cpp
-  colorspace.cpp
   constant_fold.cpp
   devicescene.cpp
   film.cpp
@@ -23,6 +22,8 @@ set(SRC
   geometry_mesh.cpp
   hair.cpp
   image.cpp
+  image_cache.cpp
+  image_loader.cpp
   image_oiio.cpp
   image_sky.cpp
   image_vdb.cpp
@@ -56,13 +57,14 @@ set(SRC_HEADERS
   bake.h
   background.h
   camera.h
-  colorspace.h
   constant_fold.h
   devicescene.h
   film.h
   geometry.h
   hair.h
   image.h
+  image_cache.h
+  image_loader.h
   image_oiio.h
   image_sky.h
   image_vdb.h

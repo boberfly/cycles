@@ -229,6 +229,10 @@ static void update_device_flags_attribute(uint32_t &device_update_flags,
         device_update_flags |= ATTR_UCHAR4_MODIFIED;
         break;
       }
+      case AttrKernelDataType::NORMAL: {
+        device_update_flags |= ATTR_NORMAL_MODIFIED;
+        break;
+      }
       case AttrKernelDataType::NUM: {
         break;
       }
@@ -253,6 +257,9 @@ static void update_attribute_realloc_flags(uint32_t &device_update_flags,
   }
   if (attributes.modified(AttrKernelDataType::UCHAR4)) {
     device_update_flags |= ATTR_UCHAR4_NEEDS_REALLOC;
+  }
+  if (attributes.modified(AttrKernelDataType::NORMAL)) {
+    device_update_flags |= ATTR_NORMAL_NEEDS_REALLOC;
   }
 }
 
@@ -519,7 +526,6 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
 
     if (device_update_flags & DEVICE_MESH_DATA_NEEDS_REALLOC) {
       dscene->tri_verts.tag_realloc();
-      dscene->tri_vnormal.tag_realloc();
       dscene->tri_vindex.tag_realloc();
       dscene->tri_shader.tag_realloc();
     }
@@ -580,11 +586,18 @@ void GeometryManager::device_update_preprocess(Device *device, Scene *scene, Pro
     dscene->attributes_uchar4.tag_modified();
   }
 
+  if (device_update_flags & ATTR_NORMAL_NEEDS_REALLOC) {
+    dscene->attributes_map.tag_realloc();
+    dscene->attributes_normal.tag_realloc();
+  }
+  else if (device_update_flags & ATTR_NORMAL_MODIFIED) {
+    dscene->attributes_normal.tag_modified();
+  }
+
   if (device_update_flags & DEVICE_MESH_DATA_MODIFIED) {
     /* if anything else than vertices or shaders are modified, we would need to reallocate, so
      * these are the only arrays that can be updated */
     dscene->tri_verts.tag_modified();
-    dscene->tri_vnormal.tag_modified();
     dscene->tri_shader.tag_modified();
   }
 
@@ -607,9 +620,8 @@ void GeometryManager::device_update_displacement_images(Device *device,
                                                         Progress &progress)
 {
   progress.set_status("Updating Displacement Images");
-  TaskPool pool;
   ImageManager *image_manager = scene->image_manager.get();
-  set<int> bump_images;
+  set<const ImageSingle *> bump_images;
 #ifdef WITH_OSL
   bool has_osl_node = false;
 #endif
@@ -642,11 +654,8 @@ void GeometryManager::device_update_displacement_images(Device *device,
           }
 
           ImageSlotTextureNode *image_node = static_cast<ImageSlotTextureNode *>(node);
-          for (int i = 0; i < image_node->handle.num_svm_slots(); i++) {
-            const int slot = image_node->handle.svm_slot(i);
-            if (slot != -1) {
-              bump_images.insert(slot);
-            }
+          if (!image_node->handle.empty()) {
+            image_node->handle.add_to_set(bump_images);
           }
         }
       }
@@ -657,16 +666,11 @@ void GeometryManager::device_update_displacement_images(Device *device,
   /* If any OSL node is used for displacement, it may reference a texture. But it's
    * unknown which ones, so have to load them all. */
   if (has_osl_node) {
-    OSLShaderManager::osl_image_slots(device, image_manager, bump_images);
+    OSLShaderManager::osl_image_handles(device, image_manager, bump_images);
   }
 #endif
 
-  for (const int slot : bump_images) {
-    pool.push([image_manager, device, scene, slot, &progress] {
-      image_manager->device_update_slot(device, scene, slot, progress);
-    });
-  }
-  pool.wait_work();
+  image_manager->device_load_images(device, scene, progress, bump_images);
 }
 
 void GeometryManager::device_update_volume_images(Device *device, Scene *scene, Progress &progress)
@@ -674,7 +678,7 @@ void GeometryManager::device_update_volume_images(Device *device, Scene *scene, 
   progress.set_status("Updating Volume Images");
   TaskPool pool;
   ImageManager *image_manager = scene->image_manager.get();
-  set<int> volume_images;
+  set<const ImageSingle *> volume_images;
 
   for (Geometry *geom : scene->geometry) {
     if (!geom->is_modified()) {
@@ -687,19 +691,13 @@ void GeometryManager::device_update_volume_images(Device *device, Scene *scene, 
       }
 
       const ImageHandle &handle = attr.data_voxel();
-      const int slot = handle.svm_slot();
-      if (slot != -1) {
-        volume_images.insert(slot);
+      if (!handle.empty()) {
+        handle.add_to_set(volume_images);
       }
     }
   }
 
-  for (const int slot : volume_images) {
-    pool.push([image_manager, device, scene, slot, &progress] {
-      image_manager->device_update_slot(device, scene, slot, progress);
-    });
-  }
-  pool.wait_work();
+  image_manager->device_load_images(device, scene, progress, volume_images);
 }
 
 void GeometryManager::device_update(Device *device,
@@ -928,6 +926,7 @@ void GeometryManager::device_update(Device *device,
           Mesh *mesh = static_cast<Mesh *>(geom);
           if (displace(device, scene, mesh, progress)) {
             displacement_done = true;
+            need_flags_update = true;
           }
         }
       }
@@ -999,7 +998,6 @@ void GeometryManager::device_update(Device *device,
         scene->update_stats->geometry.times.add_entry({"device_update (build object BVHs)", time});
       }
     });
-    TaskPool pool;
 
     size_t i = 0;
     size_t num_bvh = 0;
@@ -1013,14 +1011,14 @@ void GeometryManager::device_update(Device *device,
         }
 
         /* Note the use of #bvh_task_pool_, see its definition for details. */
-        pool.push([geom, device, dscene, scene, &progress, i, &num_bvh] {
+        bvh_task_pool_.push([geom, device, dscene, scene, &progress, i, &num_bvh] {
           geom->compute_bvh(device, dscene, &scene->params, &progress, i, num_bvh);
         });
       }
     }
 
     TaskPool::Summary summary;
-    pool.wait_work(&summary);
+    bvh_task_pool_.wait_work(&summary);
     LOG_DEBUG << "Objects BVH build pool statistics:\n" << summary.full_report();
   }
 
@@ -1106,7 +1104,6 @@ void GeometryManager::device_update(Device *device,
   dscene->tri_verts.clear_modified();
   dscene->tri_shader.clear_modified();
   dscene->tri_vindex.clear_modified();
-  dscene->tri_vnormal.clear_modified();
   dscene->curves.clear_modified();
   dscene->curve_keys.clear_modified();
   dscene->curve_segments.clear_modified();
@@ -1118,6 +1115,7 @@ void GeometryManager::device_update(Device *device,
   dscene->attributes_float3.clear_modified();
   dscene->attributes_float4.clear_modified();
   dscene->attributes_uchar4.clear_modified();
+  dscene->attributes_normal.clear_modified();
 }
 
 void GeometryManager::device_free(Device *device, DeviceScene *dscene, bool force_free)
@@ -1132,7 +1130,6 @@ void GeometryManager::device_free(Device *device, DeviceScene *dscene, bool forc
   dscene->prim_time.free_if_need_realloc(force_free);
   dscene->tri_verts.free_if_need_realloc(force_free);
   dscene->tri_shader.free_if_need_realloc(force_free);
-  dscene->tri_vnormal.free_if_need_realloc(force_free);
   dscene->tri_vindex.free_if_need_realloc(force_free);
   dscene->curves.free_if_need_realloc(force_free);
   dscene->curve_keys.free_if_need_realloc(force_free);
@@ -1145,6 +1142,7 @@ void GeometryManager::device_free(Device *device, DeviceScene *dscene, bool forc
   dscene->attributes_float3.free_if_need_realloc(force_free);
   dscene->attributes_float4.free_if_need_realloc(force_free);
   dscene->attributes_uchar4.free_if_need_realloc(force_free);
+  dscene->attributes_normal.free_if_need_realloc(force_free);
 
   /* Signal for shaders like displacement not to do ray tracing. */
   dscene->data.bvh.bvh_layout = BVH_LAYOUT_NONE;

@@ -15,6 +15,7 @@
 
 #include "util/list.h"
 #include "util/map.h"
+#include "util/types_image.h"
 
 CCL_NAMESPACE_BEGIN
 
@@ -295,6 +296,32 @@ class MultiDevice : public Device {
     return devices.back().device->get_cpu_osl_memory();
   }
 
+  device_ptr mem_device_ptr(const device_memory &mem, Device *sub_device) override
+  {
+    if (mem.device == sub_device) {
+      return mem.device_pointer;
+    }
+
+    device_ptr key = mem.device_pointer;
+    for (SubDevice &sub : devices) {
+      if (sub.device.get() == sub_device) {
+        auto it = sub.ptr_map.find(key);
+        return (it != sub.ptr_map.end()) ? it->second : device_ptr(0);
+      }
+    }
+
+    assert(!"MultiDevice::mem_device_ptr could not find sub_device");
+    return device_ptr(0);
+  }
+
+  void set_image_cache_func(KernelImageLoadRequestedCPU image_load_requested_cpu,
+                            KernelImageLoadRequestedGPU image_load_requested_gpu) override
+  {
+    for (SubDevice &sub : devices) {
+      sub.device->set_image_cache_func(image_load_requested_cpu, image_load_requested_gpu);
+    }
+  }
+
   bool is_resident(device_ptr key, Device *sub_device) override
   {
     for (SubDevice &sub : devices) {
@@ -402,7 +429,7 @@ class MultiDevice : public Device {
       owner_sub->device->mem_copy_to(mem);
       owner_sub->ptr_map[key] = mem.device_pointer;
 
-      if (mem.type == MEM_GLOBAL || mem.type == MEM_TEXTURE) {
+      if (mem.type == MEM_GLOBAL || mem.type == MEM_IMAGE_TEXTURE) {
         /* Need to create texture objects and update pointer in kernel globals on all devices */
         for (SubDevice *island_sub : island) {
           if (island_sub != owner_sub) {
@@ -419,7 +446,7 @@ class MultiDevice : public Device {
 
   void mem_move_to_host(device_memory &mem) override
   {
-    assert(mem.type == MEM_GLOBAL || mem.type == MEM_TEXTURE);
+    assert(mem.type == MEM_GLOBAL || mem.type == MEM_IMAGE_TEXTURE);
 
     device_ptr existing_key = mem.device_pointer;
     device_ptr key = (existing_key) ? existing_key : unique_key++;
@@ -465,6 +492,19 @@ class MultiDevice : public Device {
 
     assert(!"is_shared failed to find matching device");
     return false;
+  }
+
+  void mem_or_from_device(device_memory &mem, vector<uint> &combined) override
+  {
+    device_ptr key = mem.device_pointer;
+    for (SubDevice &sub : devices) {
+      SubDevice *owner_sub = find_matching_mem_device(key, sub);
+      mem.device = owner_sub->device.get();
+      mem.device_pointer = owner_sub->ptr_map[key];
+      owner_sub->device->mem_or_from_device(mem, combined);
+    }
+    mem.device = this;
+    mem.device_pointer = key;
   }
 
   void mem_copy_from(
@@ -526,7 +566,7 @@ class MultiDevice : public Device {
       owner_sub->device->mem_free(mem);
       owner_sub->ptr_map.erase(owner_sub->ptr_map.find(key));
 
-      if (mem.type == MEM_TEXTURE) {
+      if (mem.type == MEM_IMAGE_TEXTURE) {
         /* Free texture objects on all devices */
         for (SubDevice *island_sub : island) {
           if (island_sub != owner_sub) {
@@ -568,6 +608,16 @@ class MultiDevice : public Device {
     for (SubDevice &sub : devices) {
       sub.device->foreach_device(callback);
     }
+  }
+
+  bool has_unified_memory() const override
+  {
+    for (const SubDevice &sub : devices) {
+      if (sub.device->has_unified_memory()) {
+        return true;
+      }
+    }
+    return false;
   }
 };
 

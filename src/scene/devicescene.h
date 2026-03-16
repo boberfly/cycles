@@ -6,6 +6,8 @@
 
 #include "kernel/types.h"
 
+#include "util/types_image.h"
+
 #include "device/device.h"
 #include "device/memory.h"
 
@@ -26,7 +28,6 @@ class DeviceScene {
   /* mesh */
   device_vector<packed_float3> tri_verts;
   device_vector<uint> tri_shader;
-  device_vector<packed_float3> tri_vnormal;
   device_vector<packed_uint3> tri_vindex;
 
   device_vector<KernelCurve> curves;
@@ -54,6 +55,7 @@ class DeviceScene {
   device_vector<packed_float3> attributes_float3;
   device_vector<float4> attributes_float4;
   device_vector<uchar4> attributes_uchar4;
+  device_vector<packed_normal> attributes_normal;
 
   /* lights */
   device_vector<KernelLightDistribution> light_distribution;
@@ -90,6 +92,13 @@ class DeviceScene {
   device_vector<KernelOctreeRoot> volume_tree_roots;
   device_vector<int> volume_tree_root_ids;
   device_vector<float> volume_step_size;
+
+  /* Image textures */
+  device_vector<KernelImageTexture> image_textures;
+  device_vector<KernelTileDescriptor> image_texture_tile_descriptors;
+  device_vector<uint> image_texture_tile_request_bits;
+  device_vector<uint> image_texture_tile_used_bits;
+  device_vector<KernelImageUDIM> image_texture_udims;
 
   KernelData data;
 

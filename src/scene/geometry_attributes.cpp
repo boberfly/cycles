@@ -296,7 +296,8 @@ class AttributeTableBuilder {
         attr_float2{dscene->attributes_float2, 0, 0},
         attr_float3{dscene->attributes_float3, 0, 0},
         attr_float4{dscene->attributes_float4, 0, 0},
-        attr_uchar4{dscene->attributes_uchar4, 0, 0}
+        attr_uchar4{dscene->attributes_uchar4, 0, 0},
+        attr_normal{dscene->attributes_normal, 0, 0}
   {
   }
 
@@ -305,6 +306,7 @@ class AttributeTableBuilder {
   AttributeTableEntry<packed_float3> attr_float3;
   AttributeTableEntry<float4> attr_float4;
   AttributeTableEntry<uchar4> attr_uchar4;
+  AttributeTableEntry<packed_normal> attr_normal;
 
   void add(Geometry *geom,
            Attribute *mattr,
@@ -332,10 +334,13 @@ class AttributeTableBuilder {
     if (mattr->element & ATTR_ELEMENT_VOXEL) {
       /* store slot in offset value */
       const ImageHandle &handle = mattr->data_voxel();
-      offset = handle.svm_slot();
+      offset = handle.kernel_id();
     }
     else if (mattr->element & ATTR_ELEMENT_IS_BYTE) {
       offset = attr_uchar4.add(mattr->data_uchar4(), size, mattr->modified);
+    }
+    else if (mattr->element & ATTR_ELEMENT_IS_NORMAL) {
+      offset = attr_normal.add(mattr->data_normal(), size, mattr->modified);
     }
     else if (mattr->type == TypeFloat) {
       offset = attr_float.add(mattr->data_float(), size, mattr->modified);
@@ -397,6 +402,9 @@ class AttributeTableBuilder {
     else if (mattr->element & ATTR_ELEMENT_IS_BYTE) {
       attr_uchar4.reserve(size);
     }
+    else if (mattr->element & ATTR_ELEMENT_IS_NORMAL) {
+      attr_normal.reserve(size);
+    }
     else if (mattr->type == TypeFloat) {
       attr_float.reserve(size);
     }
@@ -421,6 +429,7 @@ class AttributeTableBuilder {
     attr_float3.alloc();
     attr_float4.alloc();
     attr_uchar4.alloc();
+    attr_normal.alloc();
   }
 
   void copy_to_device_if_modified()
@@ -430,6 +439,7 @@ class AttributeTableBuilder {
     attr_float3.data.copy_to_device_if_modified();
     attr_float4.data.copy_to_device_if_modified();
     attr_uchar4.data.copy_to_device_if_modified();
+    attr_normal.data.copy_to_device_if_modified();
   }
 };
 
@@ -444,20 +454,32 @@ void GeometryManager::device_update_attributes(Device *device,
    * shaders assigned, this merges the requested attributes that have
    * been set per shader by the shader manager */
   vector<AttributeRequestSet> geom_attributes(scene->geometry.size());
+  AttributeRequestSet global_attributes;
+  scene->need_global_attributes(global_attributes);
 
   for (size_t i = 0; i < scene->geometry.size(); i++) {
     Geometry *geom = scene->geometry[i];
 
     geom->index = i;
-    scene->need_global_attributes(geom_attributes[i]);
+    geom_attributes[i].add(global_attributes);
 
     for (Node *node : geom->get_used_shaders()) {
       Shader *shader = static_cast<Shader *>(node);
       geom_attributes[i].add(shader->attributes);
     }
 
-    if (geom->attributes.find(ATTR_STD_SHADOW_TRANSPARENCY)) {
-      geom_attributes[i].add(ATTR_STD_SHADOW_TRANSPARENCY);
+    for (const Attribute &attr : geom->attributes.attributes) {
+      switch (attr.std) {
+        case ATTR_STD_VERTEX_NORMAL:
+        case ATTR_STD_MOTION_VERTEX_NORMAL:
+        case ATTR_STD_CORNER_NORMAL:
+        case ATTR_STD_MOTION_CORNER_NORMAL:
+        case ATTR_STD_SHADOW_TRANSPARENCY:
+          geom_attributes[i].add(attr.std);
+          break;
+        default:
+          break;
+      }
     }
   }
 
@@ -529,6 +551,7 @@ void GeometryManager::device_update_attributes(Device *device,
       dscene->attributes_float3.need_realloc(),
       dscene->attributes_float4.need_realloc(),
       dscene->attributes_uchar4.need_realloc(),
+      dscene->attributes_normal.need_realloc(),
   };
 
   /* Fill in attributes. */

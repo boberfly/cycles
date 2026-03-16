@@ -13,7 +13,9 @@ else()
   if(NOT WINDOWS_PYTHON_DEBUG)
     set(CYCLES_INSTALL_PATH "scripts/addons_core/cycles")
   else()
-    set(CYCLES_INSTALL_PATH "$ENV{appdata}/blender foundation/blender/${BLENDER_VERSION}/scripts/addons_core/cycles")
+    set(CYCLES_INSTALL_PATH
+      "$ENV{appdata}/blender foundation/blender/${BLENDER_VERSION}/scripts/addons_core/cycles"
+    )
   endif()
 endif()
 
@@ -32,6 +34,7 @@ endif()
 if(WITH_CYCLES_NATIVE_ONLY)
   set(CXX_HAS_SSE42 FALSE)
   set(CXX_HAS_AVX2 FALSE)
+  set(CXX_HAS_F16C FALSE)
   add_definitions(
     -DWITH_KERNEL_NATIVE
   )
@@ -64,22 +67,20 @@ if(WITH_CYCLES_NATIVE_ONLY)
     endif()
     string(APPEND CMAKE_CXX_FLAGS " ${MSVC_NATIVE_ARCH_FLAGS}")
   endif()
-elseif(WIN32 AND MSVC AND SUPPORT_NEON_BUILD AND SSE2NEON_FOUND)
+elseif(SUPPORTS_NEON_BUILD AND SSE2NEON_FOUND)
+  # On ARM we use SSE2NEON to compile the cycles SSE kernels into native NEON instructions
+  # Disable the CXX_HAS_* flags so we don't add any SSE or AVX compiler flags.
   set(CXX_HAS_SSE42 FALSE)
   set(CXX_HAS_AVX2 FALSE)
-elseif(SUPPORT_NEON_BUILD AND SSE2NEON_FOUND)
-  set(CXX_HAS_SSE42 FALSE)
-  set(CXX_HAS_AVX2 FALSE)
+  set(CXX_HAS_F16C FALSE)
 elseif(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   set(CXX_HAS_SSE42 TRUE)
   set(CXX_HAS_AVX2 TRUE)
+  set(CXX_HAS_F16C TRUE)
 
-  # /arch:AVX for VC2012 and above
-  if(NOT MSVC_VERSION LESS 1700)
-    set(CYCLES_AVX2_FLAGS "/arch:AVX /arch:AVX2")
-  elseif(NOT CMAKE_CL_64)
-    set(CYCLES_AVX2_FLAGS "/arch:SSE2")
-  endif()
+  # No separate f16c flag for MSVC.
+  set(CYCLES_AVX2_FLAGS "/arch:AVX2")
+  set(CYCLES_AVX2_F16C_FLAGS "${CYCLES_AVX2_FLAGS}")
 
   # there is no /arch:SSE3, but intrinsics are available anyway
   if(CMAKE_CL_64)
@@ -87,37 +88,43 @@ elseif(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   else()
     set(CYCLES_SSE42_FLAGS "/arch:SSE2")
   endif()
-elseif(CMAKE_COMPILER_IS_GNUCC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+elseif((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
   check_cxx_compiler_flag(-msse4.2 CXX_HAS_SSE42)
   check_cxx_compiler_flag(-mavx2 CXX_HAS_AVX2)
+  check_cxx_compiler_flag(-mf16c CXX_HAS_F16C)
 
   if(CXX_HAS_SSE42)
     set(CYCLES_SSE42_FLAGS "-msse -msse2 -msse3 -mssse3 -msse4.1 -msse4.2")
-    if(CXX_HAS_AVX2)
+    if(CXX_HAS_AVX2 AND CXX_HAS_F16C)
       set(CYCLES_AVX2_FLAGS "${CYCLES_SSE42_FLAGS} -mavx -mavx2 -mfma -mlzcnt -mbmi -mbmi2 -mf16c")
+      set(CYCLES_AVX2_F16C_FLAGS "${CYCLES_AVX2_FLAGS} -mf16c")
     endif()
   endif()
 
 elseif(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
   check_cxx_compiler_flag(/QxSSE4.2 CXX_HAS_SSE42)
   check_cxx_compiler_flag(/QxCORE-AVX2 CXX_HAS_AVX2)
+  set(CXX_HAS_F16C CXX_HAS_AVX) # Same flag enables AVX, FMA and F16C
 
   if(CXX_HAS_SSE42)
     set(CYCLES_SSE42_FLAGS "/QxSSE4.2")
 
-    if(CXX_HAS_AVX2)
+    if(CXX_HAS_AVX2 AND CXX_HAS_F16C)
       set(CYCLES_AVX2_FLAGS "/QxCORE-AVX2")
+      set(CYCLES_AVX2_F16C_FLAGS "${CYCLES_AVX2_FLAGS}")
     endif()
   endif()
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Intel")
   check_cxx_compiler_flag(-xsse4.2 CXX_HAS_SSE42)
   check_cxx_compiler_flag(-xcore-avx2 CXX_HAS_AVX2)
+  set(CXX_HAS_F16C CXX_HAS_AVX) # Same flag enables AVX, FMA and F16C
 
   if(CXX_HAS_SSE42)
     set(CYCLES_SSE42_FLAGS "-xsse4.2")
 
-    if(CXX_HAS_AVX2)
+    if(CXX_HAS_AVX2 AND CXX_HAS_F16C)
       set(CYCLES_AVX2_FLAGS "-xcore-avx2")
+      set(CYCLES_AVX2_F16C_FLAGS "${CYCLES_AVX2_FLAGS}")
     endif()
   endif()
 endif()
@@ -153,7 +160,7 @@ if(WIN32 AND MSVC AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
      AND CMAKE_SYSTEM_PROCESSOR STREQUAL "AMD64")
     string(APPEND CMAKE_CXX_FLAGS " /jumptablerdata")
   endif()
-elseif(CMAKE_COMPILER_IS_GNUCC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
+elseif((CMAKE_C_COMPILER_ID STREQUAL "GNU") OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
   # Assume no signal trapping for better code generation.
   list(APPEND CYCLES_MATH_FLAGS "-fno-trapping-math")
   # Avoid overhead of setting `errno` for NaNs.
@@ -174,7 +181,7 @@ elseif(CMAKE_COMPILER_IS_GNUCC OR (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
   # Don't enable `-ffinite-math-only` since the BVH code relies on NaNs.
   # Otherwise, we could just use `-ffast-math`.
 
-  if(CMAKE_COMPILER_IS_GNUCC)
+  if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
     # Assume no signal trapping for better code generation.
     list(APPEND CYCLES_MATH_FLAGS "-fno-signaling-nans")
     # Assume a fixed rounding mode for better constant folding.
@@ -255,7 +262,7 @@ if(WITH_CYCLES_DEVICE_HIP)
 
   if(WITH_CYCLES_DEVICE_HIPRT)
     include_directories(
-      ${HIPRT_INCLUDE_DIR}
+      ${HIPRT_INCLUDE_DIRS}
     )
     add_definitions(-DWITH_HIPRT)
   endif()
@@ -305,7 +312,10 @@ if(WITH_CYCLES_EMBREE)
       add_compile_definitions("$<$<CONFIG:RelWithDebInfo>:WITH_EMBREE_GPU>")
       add_compile_definitions("$<$<CONFIG:MinSizeRel>:WITH_EMBREE_GPU>")
       if(CMAKE_BUILD_TYPE MATCHES "Debug" OR GENERATOR_IS_MULTI_CONFIG)
-        message(STATUS "The use of Embree GPU is disabled for the Debug configuration as embree${EMBREE_MAJOR_VERSION}_sycl_d.lib is not found.")
+        message(STATUS
+          "The use of Embree GPU is disabled for the Debug configuration "
+          "as embree${EMBREE_MAJOR_VERSION}_sycl_d.lib is not found."
+        )
       endif()
     else()
       add_definitions(-DWITH_EMBREE_GPU)
@@ -372,7 +382,7 @@ if(WITH_CYCLES_PATH_GUIDING)
   # Different levels can be selected to measure the overhead of different stages.
   # 1 = recording the path segments
   # 2 = 1 + generating (not storing) sample data from the segments
-  # 3 = 2 + storing the generates sample data
+  # 3 = 2 + storing the generated sample data
   # 4 = 3 + training the guiding fields
   # 5 = 4 + querying the trained guiding for sampling (full path guiding)
   add_definitions(-DPATH_GUIDING_LEVEL=5)
@@ -419,22 +429,6 @@ if(WITH_CYCLES_HYDRA_RENDER_DELEGATE AND (NOT WITH_USD))
 endif()
 if(WITH_CYCLES_HYDRA_RENDER_DELEGATE AND (NOT WITH_BLENDER) AND (NOT WITH_CYCLES_STANDALONE))
   set(CYCLES_INSTALL_PATH ${CYCLES_INSTALL_PATH}/hdCycles/resources)
-endif()
-
-if(WITH_CYCLES_CUDA_BINARIES)
-  if(MSVC)
-    set(MAX_MSVC 1800)
-    if(${CUDA_VERSION} EQUAL "8.0")
-      set(MAX_MSVC 1900)
-    elseif(${CUDA_VERSION} EQUAL "9.0")
-      set(MAX_MSVC 1910)
-    elseif(${CUDA_VERSION} EQUAL "9.1")
-      set(MAX_MSVC 1911)
-    elseif(${CUDA_VERSION} VERSION_GREATER_EQUAL 10.0)
-      set(MAX_MSVC 1999)
-    endif()
-    unset(MAX_MSVC)
-  endif()
 endif()
 
 # Subdirectories

@@ -20,10 +20,6 @@
 #include "device/oneapi/device.h"
 #include "device/optix/device.h"
 
-#ifdef WITH_HIPRT
-#  include <hiprtew.h>
-#endif
-
 #include "util/log.h"
 #include "util/math.h"
 #include "util/string.h"
@@ -248,9 +244,7 @@ vector<DeviceType> Device::available_types()
   types.push_back(DEVICE_ONEAPI);
 #endif
 #ifdef WITH_HIPRT
-  if (hiprtewInit()) {
-    types.push_back(DEVICE_HIPRT);
-  }
+  types.push_back(DEVICE_HIPRT);
 #endif
   return types;
 }
@@ -525,10 +519,15 @@ const CPUKernels &Device::get_cpu_kernels()
   return kernels;
 }
 
-void Device::get_cpu_kernel_thread_globals(
-    vector<ThreadKernelGlobalsCPU> & /*kernel_thread_globals*/)
+vector<ThreadKernelGlobalsCPU> *Device::acquire_cpu_kernel_thread_globals()
 {
   LOG_FATAL << "Device does not support CPU kernels.";
+  return nullptr;
+}
+
+void Device::release_cpu_kernel_thread_globals()
+{
+  /* No-op for non-CPU devices. */
 }
 
 OSLGlobals *Device::get_cpu_osl_memory()
@@ -552,15 +551,41 @@ void Device::host_free(const MemoryType /*type*/, void *host_pointer, const size
   util_aligned_free(host_pointer, size);
 }
 
+void Device::mem_or_from_device(device_memory &mem, vector<uint> &combined)
+{
+  mem_copy_from(
+      mem, 0, mem.data_width, (mem.data_height == 0) ? 1 : mem.data_height, sizeof(uint));
+  const uint *src = (const uint *)mem.host_pointer;
+  for (size_t i = 0; i < combined.size(); i++) {
+    combined[i] |= src[i];
+  }
+}
+
+device_ptr Device::mem_device_ptr(const device_memory &mem, Device *sub_device)
+{
+  assert(sub_device == this);
+  return mem.device_pointer;
+}
+
 GPUDevice::~GPUDevice() noexcept(false) = default;
 
-bool GPUDevice::load_texture_info()
+bool GPUDevice::load_image_info(DeviceQueue *queue)
 {
-  /* Note texture_info is never host mapped, and load_texture_info() should only
+  /* Note image_info is never host mapped, and load_image_info() should only
    * be called right before kernel enqueue when all memory operations have completed. */
-  if (need_texture_info) {
-    texture_info.copy_to_device();
-    need_texture_info = false;
+  if (need_image_info) {
+    /* If the host buffer was grown with host_only_resize() while a kernel was reading the old
+     * device buffer, we now free and reallocate it. */
+    if (image_info.device_size < image_info.memory_size()) {
+      generic_free(image_info);
+    }
+    if (queue) {
+      queue->copy_to_device(image_info);
+    }
+    else {
+      image_info.copy_to_device();
+    }
+    need_image_info = false;
     return true;
   }
   return false;
@@ -594,8 +619,8 @@ void GPUDevice::init_host_memory(const size_t preferred_texture_headroom,
    * is space left for it. */
   device_working_headroom = preferred_working_headroom > 0 ? preferred_working_headroom :
                                                              32 * 1024 * 1024LL;  // 32MB
-  device_texture_headroom = preferred_texture_headroom > 0 ? preferred_texture_headroom :
-                                                             128 * 1024 * 1024LL;  // 128MB
+  device_image_headroom = preferred_texture_headroom > 0 ? preferred_texture_headroom :
+                                                           128 * 1024 * 1024LL;  // 128MB
 
   LOG_INFO << "Mapped host memory limit set to " << string_human_readable_number(map_host_limit)
            << " bytes. (" << string_human_readable_size(map_host_limit) << ")";
@@ -632,8 +657,8 @@ void GPUDevice::move_textures_to_host(size_t size, const size_t headroom, const 
         continue;
       }
 
-      const bool is_texture = (mem.type == MEM_TEXTURE || mem.type == MEM_GLOBAL) &&
-                              (&mem != &texture_info);
+      const bool is_texture = (mem.type == MEM_IMAGE_TEXTURE || mem.type == MEM_GLOBAL) &&
+                              (&mem != &image_info);
       const bool is_image = is_texture && (mem.data_height > 1);
 
       /* Can't move this type of memory. */
@@ -659,7 +684,7 @@ void GPUDevice::move_textures_to_host(size_t size, const size_t headroom, const 
      * multiple backend devices could be moving the memory. The
      * first one will do it, and the rest will adopt the pointer. */
     if (max_mem) {
-      LOG_DEBUG << "Move memory from device to host: " << max_mem->name;
+      LOG_DEBUG << "Move memory from device to host: " << max_mem->log_name();
 
       /* Potentially need to call back into multi device, so pointer mapping
        * and peer devices are updated. This is also necessary since the device
@@ -673,8 +698,8 @@ void GPUDevice::move_textures_to_host(size_t size, const size_t headroom, const 
       max_mem->move_to_host = false;
       size = (max_size >= size) ? 0 : size - max_size;
 
-      /* Tag texture info update for new pointers. */
-      need_texture_info = true;
+      /* Tag image info update for new pointers. */
+      need_image_info = true;
     }
     else {
       break;
@@ -691,17 +716,17 @@ GPUDevice::Mem *GPUDevice::generic_alloc(device_memory &mem, const size_t pitch_
   const char *status = "";
 
   /* First try allocating in device memory, respecting headroom. We make
-   * an exception for texture info. It is small and frequently accessed,
+   * an exception for image info. It is small and frequently accessed,
    * so treat it as working memory.
    *
    * If there is not enough room for working memory, we will try to move
    * textures to host memory, assuming the performance impact would have
    * been worse for working memory. */
-  const bool is_texture = (mem.type == MEM_TEXTURE || mem.type == MEM_GLOBAL) &&
-                          (&mem != &texture_info);
+  const bool is_texture = (mem.type == MEM_IMAGE_TEXTURE || mem.type == MEM_GLOBAL) &&
+                          (&mem != &image_info);
   const bool is_image = is_texture && (mem.data_height > 1);
 
-  const size_t headroom = (is_texture) ? device_texture_headroom : device_working_headroom;
+  const size_t headroom = (is_texture) ? device_image_headroom : device_working_headroom;
 
   /* Move textures to host memory if needed. */
   if (!mem.move_to_host && !is_image && can_map_host) {
@@ -757,11 +782,9 @@ GPUDevice::Mem *GPUDevice::generic_alloc(device_memory &mem, const size_t pitch_
     }
   }
 
-  if (mem.name) {
-    LOG_DEBUG << "Buffer allocate: " << mem.name << ", "
-              << string_human_readable_number(mem.memory_size()) << " bytes. ("
-              << string_human_readable_size(mem.memory_size()) << ")" << status;
-  }
+  LOG_DEBUG << "Buffer allocate: " << mem.log_name() << ", "
+            << string_human_readable_number(mem.memory_size()) << " bytes. ("
+            << string_human_readable_size(mem.memory_size()) << ")" << status;
 
   mem.device_pointer = (device_ptr)device_pointer;
   mem.device_size = size;
@@ -802,7 +825,7 @@ void GPUDevice::generic_free(device_memory &mem)
 
   /* Host pointer should already have been freed at this point. If not we might
    * end up freeing shared memory and can't recover original host memory. */
-  assert(mem.host_pointer == nullptr || mem.move_to_host);
+  assert(mem.host_pointer == nullptr || mem.move_to_host || !mem.is_shared(this));
 
   const thread_scoped_lock lock(device_mem_map_mutex);
   DCHECK(device_mem_map.find(&mem) != device_mem_map.end());

@@ -359,30 +359,39 @@ void MetalDeviceQueue::init_execution()
     write_resource(blas_array, metal_device_->blas_array[slot], slot);
   }
 
-  device_vector<TextureInfo> &texture_info = metal_device_->texture_info;
-  id<MTLBuffer> &texture_bindings = metal_device_->texture_bindings;
-  std::vector<id<MTLResource>> &texture_slot_map = metal_device_->texture_slot_map;
-
-  /* Ensure texture_info is allocated before populating. */
-  texture_info.copy_to_device();
-
-  /* Populate texture bindings. */
-  uint64_t *bindings = (uint64_t *)texture_bindings.contents;
-  memset(bindings, 0, texture_bindings.length);
-  for (int slot = 0; slot < texture_info.size(); ++slot) {
-    if (texture_slot_map[slot]) {
-      if (metal_device_->is_texture(texture_info[slot])) {
-        write_resource(bindings, id<MTLTexture>(texture_slot_map[slot]), slot);
-      }
-      else {
-        /* The GPU address of a 1D buffer texture is written into the slot data field. */
-        write_resource(&texture_info[slot].data, id<MTLBuffer>(texture_slot_map[slot]), 0);
-      }
-    }
-  }
+  /* Populate image bindings. */
+  load_image_info();
 
   /* Synchronize memory copies. */
   synchronize();
+}
+
+void MetalDeviceQueue::load_image_info()
+{
+  /* TODO: Can this be optimized to only update info ids that changed? Why is this done delayed
+   * instead of immediately when allocating the image? */
+  device_vector<KernelImageInfo> &image_info = metal_device_->image_info;
+  id<MTLBuffer> &image_bindings = metal_device_->image_bindings;
+  std::vector<id<MTLResource>> &image_info_id_map = metal_device_->image_info_id_map;
+
+  /* Ensure image_info is allocated before populating. */
+  image_info.copy_to_device();
+
+  /* Populate texture bindings. */
+  uint64_t *bindings = (uint64_t *)image_bindings.contents;
+  memset(bindings, 0, image_bindings.length);
+  for (int image_info_id = 0; image_info_id < image_info.size(); ++image_info_id) {
+    if (image_info_id_map[image_info_id]) {
+      if (metal_device_->is_texture(image_info[image_info_id])) {
+        write_resource(bindings, id<MTLTexture>(image_info_id_map[image_info_id]), image_info_id);
+      }
+      else {
+        /* The GPU address of a 1D buffer texture is written into the image_info_id data field. */
+        write_resource(
+            &image_info[image_info_id].data, id<MTLBuffer>(image_info_id_map[image_info_id]), 0);
+      }
+    }
+  }
 }
 
 bool MetalDeviceQueue::enqueue(DeviceKernel kernel,
@@ -450,7 +459,7 @@ bool MetalDeviceQueue::enqueue(DeviceKernel kernel,
 
     /* Encode ancillaries */
     int ancillary_index = 0;
-    write_resource(ancillary_args, metal_device_->texture_bindings, ancillary_index++);
+    write_resource(ancillary_args, metal_device_->image_bindings, ancillary_index++);
 
     if (metal_device_->use_metalrt) {
       write_resource(ancillary_args, metal_device_->accel_struct, ancillary_index++);
@@ -583,7 +592,7 @@ bool MetalDeviceQueue::enqueue(DeviceKernel kernel,
         std::lock_guard<std::recursive_mutex> lock(metal_device_->metal_mem_map_mutex);
         for (auto &it : metal_device_->metal_mem_map) {
           const string c_integrator_queue_counter = "integrator_queue_counter";
-          if (it.first->name == c_integrator_queue_counter) {
+          if (it.first->global_name() == c_integrator_queue_counter) {
             if (IntegratorQueueCounter *queue_counter = (IntegratorQueueCounter *)
                                                             it.first->host_pointer)
             {
@@ -673,7 +682,7 @@ void MetalDeviceQueue::zero_to_device(device_memory &mem)
       return;
     }
 
-    assert(mem.type != MEM_GLOBAL && mem.type != MEM_TEXTURE);
+    assert(mem.type != MEM_IMAGE_TEXTURE);
 
     if (mem.memory_size() == 0) {
       return;
@@ -715,7 +724,7 @@ void MetalDeviceQueue::copy_to_device(device_memory &mem)
       metal_device_->mem_alloc(mem);
     }
 
-    assert(mem.device_pointer != 0);
+    assert(mem.device->mem_device_ptr(mem, metal_device_) != 0);
     assert(mem.host_pointer != nullptr);
     /* No need to copy - Apple Silicon has Unified Memory Architecture. */
   }
@@ -724,6 +733,20 @@ void MetalDeviceQueue::copy_to_device(device_memory &mem)
 void MetalDeviceQueue::copy_from_device(device_memory & /*mem*/)
 {
   /* No need to copy - Apple Silicon has Unified Memory Architecture. */
+}
+
+void *MetalDeviceQueue::copy_from_device_synchronized(device_memory &mem,
+                                                      vector<uint8_t> & /*storage*/)
+{
+  if (mem.memory_size() == 0) {
+    return nullptr;
+  }
+
+  /* Wait until kernels have finished before returning from unified memory. */
+  synchronize();
+
+  device_ptr d_ptr = mem.device->mem_device_ptr(mem, metal_device_);
+  return (d_ptr) ? reinterpret_cast<MetalDevice::MetalMem *>(d_ptr)->hostPtr : nullptr;
 }
 
 void MetalDeviceQueue::prepare_resources(DeviceKernel /*kernel*/)
@@ -735,7 +758,7 @@ void MetalDeviceQueue::prepare_resources(DeviceKernel /*kernel*/)
     device_memory *mem = it.first;
 
     MTLResourceUsage usage = MTLResourceUsageRead;
-    if (mem->type != MEM_GLOBAL && mem->type != MEM_READ_ONLY && mem->type != MEM_TEXTURE) {
+    if (mem->type != MEM_GLOBAL && mem->type != MEM_READ_ONLY && mem->type != MEM_IMAGE_TEXTURE) {
       usage |= MTLResourceUsageWrite;
     }
 
@@ -750,7 +773,7 @@ void MetalDeviceQueue::prepare_resources(DeviceKernel /*kernel*/)
   }
 
   /* ancillaries */
-  [mtlComputeEncoder_ useResource:metal_device_->texture_bindings usage:MTLResourceUsageRead];
+  [mtlComputeEncoder_ useResource:metal_device_->image_bindings usage:MTLResourceUsageRead];
 }
 
 id<MTLComputeCommandEncoder> MetalDeviceQueue::get_compute_encoder(DeviceKernel kernel)

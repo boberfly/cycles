@@ -12,8 +12,12 @@ set(INC_SYS
 
 set(SRC
   aligned_malloc.cpp
+  colorspace.cpp
   debug.cpp
+  guarded_allocator.cpp
   ies.cpp
+  image_maketx.cpp
+  image_metadata.cpp
   log.cpp
   math_cdf.cpp
   md5.cpp
@@ -44,14 +48,15 @@ set(SRC_HEADERS
   array.h
   atomic.h
   boundbox.h
+  cache_limiter.h
   color.h
+  colorspace.h
   concurrent_set.h
   concurrent_vector.h
   debug.h
   defines.h
   deque.h
   disjoint_set.h
-  guarded_allocator.cpp
   guarded_allocator.h
   guiding.h
   half.h
@@ -59,6 +64,8 @@ set(SRC_HEADERS
   ies.h
   image.h
   image_impl.h
+  image_maketx.h
+  image_metadata.h
   list.h
   log.h
   map.h
@@ -102,7 +109,6 @@ set(SRC_HEADERS
   system.h
   task.h
   tbb.h
-  texture.h
   thread.h
   time.h
   transform.h
@@ -112,10 +118,12 @@ set(SRC_HEADERS
   types_float3.h
   types_float4.h
   types_float8.h
+  types_image.h
   types_int2.h
   types_int3.h
   types_int4.h
   types_int8.h
+  types_normal.h
   types_spectrum.h
   types_rgbe.h
   types_uchar2.h

@@ -9,6 +9,7 @@
 #include "integrator/path_trace.h"
 #include "scene/background.h"
 #include "scene/camera.h"
+#include "scene/image.h"
 #include "scene/integrator.h"
 #include "scene/light.h"
 #include "scene/mesh.h"
@@ -366,7 +367,18 @@ RenderWork Session::run_update_for_next_iteration()
   if (render_work) {
     const scoped_timer update_timer;
 
+    /* Pass navigation state to image manager for viewport eviction. */
+    if (!params.background) {
+      scene->image_manager->set_navigating(navigating_);
+      scene->image_manager->evict_unused_tiles(device.get(), scene.get(), false);
+    }
+
     if (switched_to_new_tile) {
+      /* Final render: evict at tile boundaries. */
+      if (params.background) {
+        scene->image_manager->evict_unused_tiles(device.get(), scene.get(), true);
+      }
+
       BufferParams tile_params = buffer_params_;
 
       const Tile &tile = tile_manager_.get_current_tile();
@@ -397,6 +409,9 @@ RenderWork Session::run_update_for_next_iteration()
     const int height = max(1, buffer_params_.full_height / resolution);
 
     scene->update_camera_resolution(progress, width, height, params.pixel_size);
+
+    scene->image_manager->set_skip_tile_loading(
+        device.get(), scene.get(), render_work.resolution_divider > params.pixel_size);
 
     /* Unlock scene mutex before loading denoiser kernels, since that may attempt to activate
      * graphics interop, which can deadlock when the scene mutex is still being held. */
@@ -625,6 +640,11 @@ void Session::set_pause(bool pause)
   else if (pause_) {
     update_status_time(pause_);
   }
+}
+
+void Session::set_navigating(bool navigating)
+{
+  navigating_ = navigating;
 }
 
 void Session::set_output_driver(unique_ptr<OutputDriver> driver)

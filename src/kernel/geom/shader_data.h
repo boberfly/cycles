@@ -187,7 +187,8 @@ ccl_device_inline void shader_setup_from_sample(KernelGlobals kg,
     if (sd->type == PRIMITIVE_TRIANGLE) {
       /* smooth normal */
       if (sd->shader & SHADER_SMOOTH_NORMAL) {
-        sd->N = triangle_smooth_normal(kg, Ng, sd->prim, sd->u, sd->v);
+        sd->N = triangle_smooth_normal(
+            kg, Ng, sd->object, sd->object_flag, sd->prim, sd->u, sd->v);
 
         if (!(sd->object_flag & SD_OBJECT_TRANSFORM_APPLIED)) {
           object_normal_transform_auto(kg, sd, &sd->N);
@@ -278,6 +279,18 @@ ccl_device void shader_setup_from_displace(KernelGlobals kg,
 
   /* Assign some incoming direction to avoid division by zero. */
   sd->wi = sd->N;
+
+#ifdef __RAY_DIFFERENTIALS__
+  /* Set ray differentials based on triangle size for texture filtering.
+   * The parametric step across the triangle is 1.0, giving dPdx = dPdu
+   * and dPdy = dPdv.
+   * TODO: consider computing this based on all triangles adjacent to the vertex. */
+  sd->du.dx = 1.0f;
+  sd->du.dy = 0.0f;
+  sd->dv.dx = 0.0f;
+  sd->dv.dy = 1.0f;
+  sd->dP = 0.5f * (len(sd->dPdu) + len(sd->dPdv));
+#endif
 }
 
 /* ShaderData setup for point on curve. */
@@ -366,6 +379,7 @@ ccl_device_inline void shader_setup_from_background(KernelGlobals kg,
                                                     ccl_private ShaderData *ccl_restrict sd,
                                                     const float3 ray_P,
                                                     const float3 ray_D,
+                                                    const float ray_dD,
                                                     const float ray_time)
 {
   /* for NDC coordinates */
@@ -390,16 +404,17 @@ ccl_device_inline void shader_setup_from_background(KernelGlobals kg,
 
 #ifdef __DPDU__
   /* dPdu/dPdv */
-  sd->dPdu = zero_float3();
-  sd->dPdv = zero_float3();
+  /* Construct arbitrary local coordinate system. */
+  make_orthonormals(sd->Ng, &sd->dPdu, &sd->dPdv);
 #endif
 
 #ifdef __RAY_DIFFERENTIALS__
   /* differentials */
-  sd->dP = differential_zero_compact(); /* TODO: ray->dP */
-  sd->dI = differential_zero_compact();
-  sd->du = differential_zero();
-  sd->dv = differential_zero();
+  sd->dP = ray_dD;
+  sd->dI = differential_incoming_compact(ray_dD);
+  /* Make the uv coordinate system match the constructed local coordinate system. */
+  sd->du.dx = sd->dv.dy = sd->dP;
+  sd->du.dy = sd->dv.dx = 0.0f;
 #endif
 }
 

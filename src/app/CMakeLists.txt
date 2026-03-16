@@ -64,6 +64,13 @@ cycles_external_libraries_append(LIB)
 include_directories(${INC})
 include_directories(SYSTEM ${INC_SYS})
 
+if(APPLE AND NOT CYCLES_STANDALONE_REPOSITORY)
+  set(app_output_dir Blender.app/Contents/MacOS)
+  set(app_install_dir Blender.app/Contents/MacOS)
+else()
+  set(app_install_dir ${CMAKE_INSTALL_PREFIX})
+endif()
+
 # Application build targets
 
 if(WITH_CYCLES_STANDALONE)
