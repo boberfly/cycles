@@ -179,21 +179,28 @@ macro(cycles_external_libraries_append libraries)
   endif()
 endmacro()
 
-macro(cycles_install_libraries target)
-  # Copy DLLs for dynamically linked libraries.
-  if(WIN32)
-    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-      install(
-        FILES
-        ${TBB_ROOT_DIR}/bin/tbb_debug${CMAKE_SHARED_LIBRARY_SUFFIX}
-        ${OPENVDB_ROOT_DIR}/bin/openvdb_d${CMAKE_SHARED_LIBRARY_SUFFIX}
-        DESTINATION ${CMAKE_INSTALL_PREFIX})
+macro(cycles_install_libraries target_dir)
+  # Install shared libraries.
+  install(
+    FILES ${PLATFORM_BUNDLED_LIBRARIES_RELEASE}
+    DESTINATION "${target_dir}${PLATFORM_LIB_INSTALL_DIR}"
+    CONFIGURATIONS Release;RelWithDebInfo;MinSizeRel
+  )
+  install(
+    FILES ${PLATFORM_BUNDLED_LIBRARIES_DEBUG}
+    DESTINATION "${target_dir}${PLATFORM_LIB_INSTALL_DIR}"
+    CONFIGURATIONS Debug
+  )
+endmacro()
+
+macro(set_and_warn_library_found
+  _library_name _library_found _setting)
+  if(((NOT ${_library_found}) OR (NOT ${${_library_found}})) AND ${${_setting}})
+    if(WITH_STRICT_BUILD_OPTIONS)
+      message(SEND_ERROR "${_library_name} required but not found")
     else()
-      install(
-        FILES
-        ${TBB_ROOT_DIR}/bin/tbb${CMAKE_SHARED_LIBRARY_SUFFIX}
-        ${OPENVDB_ROOT_DIR}/bin/openvdb${CMAKE_SHARED_LIBRARY_SUFFIX}
-        DESTINATION ${CMAKE_INSTALL_PREFIX})
+      message(STATUS "${_library_name} not found, disabling ${_setting}")
     endif()
+    set(${_setting} OFF)
   endif()
 endmacro()

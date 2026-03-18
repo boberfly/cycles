@@ -243,6 +243,8 @@ include(CTest)
 include_directories(
 	third_party/cuew/include
 	third_party/hipew/include
+  third_party/sky/include
+  third_party/mikktspace
 )
 
 ###########################################################################
