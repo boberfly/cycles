@@ -99,6 +99,7 @@ if(EXISTS ${_cycles_lib_dir} AND WITH_LIBS_PRECOMPILED)
   _set_default(OPENIMAGEDENOISE_ROOT_DIR "${_cycles_lib_dir}/openimagedenoise")
   _set_default(OPENIMAGEIO_ROOT_DIR "${_cycles_lib_dir}/openimageio")
   _set_default(OPENJPEG_ROOT_DIR "${_cycles_lib_dir}/openjpeg")
+  _set_default(openjph_ROOT "${_cycles_lib_dir}/openjph")
   _set_default(OPENSUBDIV_ROOT_DIR "${_cycles_lib_dir}/opensubdiv")
   _set_default(OPENVDB_ROOT_DIR "${_cycles_lib_dir}/openvdb")
   _set_default(OSL_ROOT_DIR "${_cycles_lib_dir}/osl")
@@ -188,7 +189,7 @@ if(WITH_USD)
   set(WITH_PYTHON ON)
 
   if(WIN32)
-    set(PYTHON_VERSION 3.11)
+    set(PYTHON_VERSION 3.13)
     string(REPLACE "." "" PYTHON_VERSION_NO_DOTS ${PYTHON_VERSION})
     set(PYTHON_INCLUDE_DIRS ${PYTHON_ROOT_DIR}/${PYTHON_VERSION_NO_DOTS}/include)
     set(PYTHON_LIBRARIES
@@ -314,6 +315,7 @@ else()
 	add_bundled_libraries(openexr/lib)
 	add_bundled_libraries(imath/lib)
 endif()
+add_bundled_libraries(openjph/lib)
 
 ###########################################################################
 # OpenShadingLanguage
