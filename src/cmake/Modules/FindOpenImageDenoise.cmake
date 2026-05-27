@@ -39,7 +39,7 @@ find_path(OPENIMAGEDENOISE_INCLUDE_DIR
 )
 
 set(_openimagedenoise_FIND_COMPONENTS
-  OpenImageDenoise
+  OpenImageDenoise${OIDN_LIBNAME_SUFFIX}
 )
 
 # These are needed when building statically
@@ -89,7 +89,7 @@ endforeach()
 
 find_library(OPENIMAGEDENOISE_LIBRARY
   NAMES
-    OpenImageDenoise
+    OpenImageDenoise${OIDN_LIBNAME_SUFFIX}
   HINTS
     ${_openimagedenoise_SEARCH_DIRS}
   PATH_SUFFIXES

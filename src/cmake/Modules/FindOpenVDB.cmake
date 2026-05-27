@@ -41,6 +41,7 @@ find_path(OPENVDB_INCLUDE_DIR
 find_library(OPENVDB_LIBRARY
   NAMES
     openvdb
+    ${OPENVDB_SHARED_LIBRARY_NAME}
   HINTS
     ${_openvdb_SEARCH_DIRS}
   PATH_SUFFIXES
