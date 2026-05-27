@@ -10,7 +10,10 @@
 #  include <openvdb/openvdb.h>
 
 #  define NANOVDB_USE_OPENVDB
+// There's issues with onetbb and the nanovdb that comes with openusd 12.0.1
+#if (NANOVDB_MAJOR_VERSION_NUMBER == 32 && NANOVDB_MINOR_VERSION_NUMBER > 7)
 #  define NANOVDB_USE_TBB
+#endif
 
 #  include <nanovdb/NanoVDB.h>  // manages and streams the raw memory buffer of a NanoVDB grid.
 

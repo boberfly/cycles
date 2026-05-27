@@ -10,6 +10,8 @@
 #  include "util/windows.h"
 #endif
 
+#define TBB_PREVIEW_CONCURRENT_ORDERED_CONTAINERS 1
+
 #include <tbb/concurrent_set.h>
 
 CCL_NAMESPACE_BEGIN
